@@ -1,0 +1,15 @@
+{
+  "name": "mongo",
+  "description": "A minimal D application.",
+  "copyright": "Copyright © 2018, Clinton Sakun",
+  "license": "proprietary",
+  "targetType": "library",
+  "dependencies": {},
+  "libs": ["mongoc-1.0"],
+  "authors": [
+	  "Christian Durán C."
+  ],
+  "subConfigurations": {
+    "vibe-d:tls": "notls"
+  }
+}
