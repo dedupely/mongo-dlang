@@ -28,6 +28,17 @@ unittest {
     if(collection.count) {
       collection.drop();
     }
+
+    enum ExampleStringEnum : string {
+      A = "A",
+      B = "B"
+    }
+
+    enum ExampleIntEnum {
+      A,
+      B
+    }
+
     struct ExampleStruct {
       int intVal = 1;
       long longVal = 2L;
@@ -36,6 +47,8 @@ unittest {
       int [][] multidimArray = [[1,2],[3,4]];
       string stringVal = "Text";
       int [string] aa;
+      ExampleStringEnum strEnum = ExampleStringEnum.A;
+      ExampleIntEnum intEnum = ExampleIntEnum.A;
     }
     // Insert empty BSON (it has only default values)
     // It'll have an _id in Mongo.
@@ -1024,7 +1037,7 @@ struct BSON {
         , args
       );
     }
-    static if(is(T == string)) {
+    static if(is(OriginalType!T == string)) {
       if(name == `_id`) { // Automatic conversion to bson_oid_t
         auto toAppend = val.toId;
         success = appendOp!bson_append_oid(
@@ -1075,13 +1088,13 @@ struct BSON {
       // TODO: Check if toAppend.unlock is needed.
     } else {
       // 4 parameter appends.
-      static if(is(T == int)) {
+      static if(is(OriginalType!T == int)) {
         alias fun = bson_append_int32;
-      } else static if(is(T == long)) {
+      } else static if(is(OriginalType!T == long)) {
         alias fun = bson_append_int64;
-      } else static if(is(T == bool)) {
+      } else static if(is(OriginalType!T == bool)) {
         alias fun = bson_append_bool;
-      } else static if(is(T == double)) {
+      } else static if(is(OriginalType!T == double)) {
         alias fun = bson_append_double;
       } else {
         static assert(0, `Unrecognised type for appending to BSON `~ T.stringof);
@@ -1157,22 +1170,22 @@ auto as(type)(bson_value_t * val) {
   assert(val);
   auto vval = val.value;
   auto vtype = val.value_type;
-  static if(is(type == int)){
+  static if(is(OriginalType!type == int)){
     assert(vtype == bson_type_t.BSON_TYPE_INT32);
-    return vval.v_int32;
-  } else static if(is(type == long)) {
+    return to!type(vval.v_int32);
+  } else static if(is(OriginalType!type == long)) {
     assert(vtype == bson_type_t.BSON_TYPE_INT64);
-    return vval.v_int64;
-  } else static if(is(type == bool)) {
+    return to!type(vval.v_int64);
+  } else static if(is(OriginalType!type == bool)) {
     assert(vtype == bson_type_t.BSON_TYPE_BOOL);
-    return vval.v_bool;
-  } else static if(is(type == string)) {
+    return to!type(vval.v_bool);
+  } else static if(is(OriginalType!type == string)) {
     assert(vtype == bson_type_t.BSON_TYPE_UTF8);
     auto toReturn = vval.v_utf8.str[0..vval.v_utf8.len];
-    return toReturn.to!string;
-  } else static if(is(type == double)) {
+    return to!type(toReturn.to!string);
+  } else static if(is(OriginalType!type == double)) {
     assert(vtype == bson_type_t.BSON_TYPE_DOUBLE);
-    return vval.v_double;
+    return to!type(vval.v_double);
   } else static if(is(type == bson_oid_t)) {
     assert(vtype == bson_type_t.BSON_TYPE_OID);
     return vval.v_oid;
