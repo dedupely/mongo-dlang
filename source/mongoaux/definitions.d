@@ -37,6 +37,7 @@ extern (C) {
     ssize_t len,
     bson_error_t *error
   );
+  bool bson_has_field(const bson_t *bson, const char *key);
   bool bson_append_int32(
     bson_t *bson,
     const char *key,
@@ -233,8 +234,9 @@ extern (C) {
   bool bson_iter_init(bson_iter_t *iter, const bson_t *bson);
   bool bson_iter_init_find 
     (bson_iter_t *iter, const bson_t *bson, const char *key);
+  bson_oid_t * bson_iter_oid (const bson_iter_t *iter);
   void bson_oid_init_from_string(bson_oid_t *oid, const char *str);
   bool bson_oid_is_valid (const char *str, size_t length);
   void bson_oid_to_string (const bson_oid_t *oid, char * str);
-
+  bson_type_t bson_iter_type (const bson_iter_t *iter);
 }
