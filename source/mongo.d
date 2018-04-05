@@ -387,8 +387,6 @@ unittest {
     dataRange ~= ExampleStruct(i);
   }
   auto ids = collection.insert(dataRange);
-  import std.stdio;
-  //writeln(ids);
   
   struct Query {
     bson_oid_t _id;
@@ -432,7 +430,45 @@ unittest {
     rangeWithIDs ~= Result(ids[i], i.to!int);
   }
   assert (collection.insert(rangeWithIDs) == ids);
+}
+
+unittest {
+  struct B {
+   string hello = "";
+   int boo;
+  }
+  struct A {
+    int blah;
+    B[] boos;
+    B[][string] assocBoos; 
+  }
+  struct WithoutBoo {
+    string hello = "";
+  }
+  struct AWithoutBoo {
+    WithoutBoo[] boos;
+    WithoutBoo[][string] assocBoos;
+  }
+  auto pool = MongoPool("mongodb://localhost");
+  scope(exit) pool.unlock();
+  auto client = pool.lock();
+  scope(exit) client.unlock(); 
+  auto collection = (*(*client) ["newBase"])["newCollection"];
+
+  if(collection.count) {
+    collection.drop();
+  }
+  auto toInsert = A();
+  toInsert.assocBoos["a"] ~= B("b");
+  toInsert.boos ~= B("b2");
+  collection.insert(toInsert);
+  // If it finds extra fields in WithoutBoo (in this case boo), it would error out.
+  auto foundBSON = collection.findOne!AWithoutBoo;
+  assert(foundBSON.assocBoos["a"][0] == WithoutBoo("b"));
+  assert(foundBSON.boos[0] == WithoutBoo("b2"));
   
+  // Insert a default substruct
+  toInsert.boos[0].hello = "";
 }
 
 
@@ -903,26 +939,45 @@ struct Collection {
 
 enum MongoKeep;
 
+/// Checks whether the instance of 'Type' has the default value on 'field'
+/// if it does and isn't marked with the MongoKeep UDA does nothing,
+/// else appends that field to the BSON.
+/// In case the field is a struct or array, it checks recursively.
+bool checkIfDefault(string field, Type)(
+  Type instance
+  , ref BSON toAppendTo
+  , bool ignoreDefaults
+) {
+  auto instanceField = __traits(getMember, instance, field);
+
+  mixin(`alias SubField = Type.` ~ field ~ `;`);
+  alias SubType = typeof(SubField);
+  // Save only the fields with non default values or the ones that
+  // have the @MongoKeep UDA.
+  if(
+      (!ignoreDefaults)
+      || instanceField != __traits(getMember, Type.init, field)
+      || hasUDA!(mixin(`Type.` ~ field), MongoKeep)
+    ) {
+    // Fields with string UDAs should append documents with the document key
+    // as a string, for example @("$set") int a = 3;
+    // would add a $set : { "a" : 3 }
+    toAppendTo.append(strUDA!(Type, field), instanceField, ignoreDefaults);
+    return true;
+  }
+  return false;
+}
+
 /// Fills a BSON with the members from a struct.
 /// if ignoreDefaults is true, then values with the default value aren't added.
 /// this behavior is useful to toggle it on insertions but off for option
 /// or query parameters.
-auto ref fillBSON(Type)(Type instance, ref BSON toFill, bool ignoreDefaults = true) {
-  static foreach(field; FieldNameTuple!Type) { {
-    auto instanceField = __traits(getMember, instance, field);
-    // Save only the fields with non default values or the ones that
-    // have the @MongoKeep UDA.
-    if (
-        (!ignoreDefaults)
-        || instanceField != __traits(getMember, Type.init, field)
-        || hasUDA!(mixin(`Type.` ~ field), MongoKeep)
-       ) {
-      // Fields with string UDAs should append documents with the document key
-      // as a string, for example @("$set") int a = 3;
-      // would add a $set : { "a" : 3 }
-      toFill.append(strUDA!(Type, field), instanceField, ignoreDefaults);
-    }
-  } }
+bool fillBSON(Type)(Type instance, ref BSON toFill, bool ignoreDefaults = true) {
+  bool toReturn = false;
+  static foreach(field; FieldNameTuple!Type) {
+    toReturn |= checkIfDefault!field(instance, toFill, ignoreDefaults);
+  }
+  return toReturn;
 }
 
 // Search for a string UDA and return it's value.
@@ -931,14 +986,6 @@ string strUDA (alias Type, string fieldName)() {
   mixin(`alias FieldType = Type.` ~ fieldName ~ `;`);
   static foreach(uda; __traits(getAttributes, mixin(`Type.` ~ fieldName))) {
     static if(is(typeof(uda) == string)) {
-      /+
-      static assert(
-        __traits(isPOD, typeof(mixin(`Type.` ~ fieldName)))
-        && isAggregateType!(typeof(mixin(`Type.` ~ fieldName)))
-        , `Fields with UDA strings should be POD structs: `
-        ~ Type.stringof ~ `.` ~ fieldName
-      );
-      +/
       toReturn = uda;
     }
   }
@@ -1164,7 +1211,7 @@ struct BSON {
 
       success = appendOp!bson_append_array_begin(arr.data);
       foreach(i, element; val) {
-        arr.append(i.to!string, element);
+        arr.append(i.to!string, element, ignoreSubDocDefaults);
       }
       success &= bson_append_array_end(
         data
@@ -1174,7 +1221,7 @@ struct BSON {
       BSON arr = empty!(BSON, true)();
       success = appendOp!bson_append_array_begin(arr.data);
       foreach(key, value; val) {
-        arr.append(key, value);
+        arr.append(key, value, ignoreSubDocDefaults);
       }
       success &= bson_append_array_end(
         data
@@ -1264,6 +1311,7 @@ struct DateTime {
   long value;
   alias value this;
 }
+
 /// Converts a bson_value_t to another type.
 /// If BSON is used as a type, it assumes it's a document.
 /// Make sure to unlock() that BSON.
